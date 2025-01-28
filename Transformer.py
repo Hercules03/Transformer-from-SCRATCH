@@ -18,7 +18,7 @@ class SelfAttention(nn.Module):
         self.heads = heads  # How many parallel attention operations will be performed
         self.head_dim = embed_size // heads
         
-        assert (self.head_dim * heads = embed_size), "Embed size needs to be divisible by heads"
+        assert (self.head_dim * heads == embed_size), "Embed size needs to be divisible by heads"
         
         # Setup the QKV linear layer at the begining of the multi-head attention
         # Creating three different representations of the same input that serve distinct roles in attention calculation
@@ -41,8 +41,8 @@ class SelfAttention(nn.Module):
         self.fc_out = nn.Linear(heads*self.head_dim, embed_size)    # Stack those 8 ouptut from the heads into one output layer
     
     # Defines how data flows through the sel-attention mechanism
-    def forward(self, values, keys, query, mask):
-        N = query.shape[0]  # Number of queries (Batch size) **Number of training exmaples are processed together in one forward pass
+    def forward(self, values, keys, queries, mask):
+        N = queries.shape[0]  # Number of queries (Batch size) **Number of training exmaples are processed together in one forward pass
         # Each batch process N sentences at once
         value_len, key_len, query_len = values.shape[1], keys.shape[1], queries.shape[1]    # Typically it will be the length of input sequence
         # How many tokens/words/items are in each sequence in your batch
@@ -78,7 +78,7 @@ class SelfAttention(nn.Module):
         """
         values = values.reshape(N, value_len, self.heads, self.head_dim)
         keys = keys.reshape(N, key_len, self.heads, self.head_dim)
-        queries = queries.reshape(N, queries_len, self.heads, self.head_dim)
+        queries = queries.reshape(N, query_len, self.heads, self.head_dim)
         
         values = self.values(values)
         keys = self.keys(keys)
@@ -112,7 +112,7 @@ class SelfAttention(nn.Module):
         # Taking the attention weights, multiplying these weight with the actual values
         # Creates a weighted sum of the values based on the attention scores
         # Collecting information from all values, weighted by how import each one is
-                """ 
+        """ 
         EXAMPLE
         ============
         If we are processing the word "deep":
@@ -120,7 +120,7 @@ class SelfAttention(nn.Module):
         - Each value vector gets multipled by its corresponding weight
         - The results are summed to create the output representation for "deep"
         """
-        out = torch.enisum("nhql, nlhd -> nqhd", [attention, values]).reshape(
+        out = torch.einsum("nhql, nlhd -> nqhd", [attention, values]).reshape(
             N, query_len, self.heads*self.head_dim
         )
         # attention shape: (N, heads, query_len, key_len)
@@ -149,13 +149,13 @@ class TransformerBlock(nn.Module):
         """
         self.feed_forward = nn.Sequential(
             nn.Linear(embed_size, forward_expansion*embed_size),
-            nn.ReLU()
+            nn.ReLU(),
             nn.Linear(forward_expansion*embed_size, embed_size)
         )
         self.dropout = nn.Dropout(dropout)
         
     def forward(self, value, key, query, mask):
-        attention = self.attention(values, keys, query, mask)
+        attention = self.attention(value, key, query, mask)
         
         x = self.dropout(self.norm1(attention + query))
         forward = self.feed_forward(x)
@@ -196,16 +196,16 @@ class Encoder(nn.Module):
         )
         self.dropout = nn.Dropout(dropout)
         
-        def forward(self, x, mask):
-            N, seq_length = x.shape
-            positions = torch.arrange(0, seq_length).expand(N, seq_length).to(self.device)
+    def forward(self, x, mask):
+        N, seq_length = x.shape
+        positions = torch.arange(0, seq_length).expand(N, seq_length).to(self.device)
             
-            out = self.dropout(self.word_embedding(x) + self.position_embedding(positions)) # Combines word and positional embeddings
+        out = self.dropout(self.word_embedding(x) + self.position_embedding(positions)) # Combines word and positional embeddings
             
-            for layer in self.layers:
-                out = layer(out, out, out, mask)    # out arguments represent query, key, and value matrices
+        for layer in self.layers:
+            out = layer(out, out, out, mask)    # out arguments represent query, key, and value matrices
             
-            return out
+        return out
         
 class DecoderBlock(nn.Module):
     def __init__(self, embed_size, heads, forward_expansion, dropout, device):
@@ -218,8 +218,6 @@ class DecoderBlock(nn.Module):
         self.dropout = nn.Dropout(dropout)
         
     def forward(self, x, value, key, src_mask, trg_mask):
-        
-        
         """ 
         EXAMPLE (Machine Translation) English - French
         
@@ -234,8 +232,8 @@ class DecoderBlock(nn.Module):
         - Output sequence we want to generate
         - French sentence
         - Generated by DECODER
-        
         """
+        
         attention = self.attention(x, x, x, trg_mask)   # Masked Self-Attentionm uses trg_mask to prevent looking at the future tokens
         query = self.dropout(self.norm(attention + x))  # Residual connection
         
@@ -247,6 +245,7 @@ class Decoder(nn.Module):
     def __init__(
         self,
         trg_vocab_size,
+        embed_size,
         num_layers,
         heads,
         forward_expansion,
@@ -273,7 +272,7 @@ class Decoder(nn.Module):
         self.fc_out = nn.Linear(embed_size, trg_vocab_size) # Final layer that converts embeddings back to vocabulary probabilites
         self.dropout = nn.Dropout(dropout)
         
-    def forward(self, x, enc_out, srx_mask, trg_mask):
+    def forward(self, x, enc_out, src_mask, trg_mask):
         N, seq_length = x.shape # Get dimensions and positions
         positions = torch.arange(0, seq_length).expand(N, seq_length).to(self.device)   # Creates position indices for each token
         x = self.dropout((self.word_embedding(x) + self.position_embedding(positions))) # Combine embeddings
@@ -287,7 +286,6 @@ class Decoder(nn.Module):
         return out
         
 class Transformer(nn.Module):
-    
     
     """
     Padding
@@ -309,6 +307,7 @@ class Transformer(nn.Module):
     - src_pad_idx: The padding token value for source sequences
     - trg_pad_idx: The padding token value for target sequences
     """
+    
     def __init__(
         self,
         src_vocab_size, # Size of source vocabulary (e.g. Size of English vocab list)
@@ -318,6 +317,7 @@ class Transformer(nn.Module):
         embed_size=512,
         num_layers=6,
         heads=8,
+        forward_expansion=4,
         dropout=0,
         device="cuda",
         max_length=100
@@ -347,7 +347,7 @@ class Transformer(nn.Module):
         )
         
         self.src_pad_idx = src_pad_idx
-        self.trg+pad_idx = trg_pad_idx
+        self.trg_pad_idx = trg_pad_idx
         self.device = device
         
     # Creates mask to ignore padding tokens in source sequence
