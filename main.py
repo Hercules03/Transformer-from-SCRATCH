@@ -17,9 +17,9 @@ if __name__ == "__main__":
     dropout = 0.1
     max_length = 100
     forward_expansion = 4
-    batch_size = 2
-    src_seq_length = 10
-    trg_seq_length = 12
+    batch_size = 1
+    src_seq_length = 6
+    trg_seq_length = 5
 
     # Initialize model
     model = Transformer(
